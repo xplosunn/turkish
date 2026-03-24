@@ -167,7 +167,7 @@ export const canRead = (
     case "array":
       switch (normalizedNewSchema.kind) {
         case "array":
-          return [];
+          return canRead(normalizedNewSchema.of, normalizedOldSchema.of);
         case "oneOf":
           return anyMatch(normalizedOldSchema, normalizedNewSchema.possibilities);
         default:

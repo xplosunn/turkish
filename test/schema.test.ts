@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  JsonArray,
   JsonBoolean,
   JsonNull,
   JsonObject,
@@ -134,6 +135,13 @@ test("canRead option from non-option", () => {
   ]);
 
   expectNoIssues(canRead(newSchema, oldSchema));
+});
+
+test("canRead fails for arrays with incompatible element types", () => {
+  const newSchema = JsonArray(JsonString());
+  const oldSchema = JsonArray(JsonBoolean());
+
+  assert.equal(canRead(newSchema, oldSchema).length, 1);
 });
 
 test("canRead fails for incompatible types", () => {
