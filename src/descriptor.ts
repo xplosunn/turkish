@@ -7,18 +7,14 @@ export class JsonConversionError extends Error {
   }
 }
 
-export const isJsonConversionError = (
-  value: unknown,
-): value is JsonConversionError => value instanceof JsonConversionError;
+export type DecodeResult<T> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly error: JsonConversionError };
 
 export interface JsonConverter<T> {
-  readonly fromJson: (json: string) => T | JsonConversionError;
+  readonly fromJson: (json: string) => DecodeResult<T>;
   readonly toJson: (value: T) => string;
 }
-
-export const JsonConverter = <T>(
-  converter: JsonConverter<T>,
-): JsonConverter<T> => converter;
 
 export interface JsonDescriptor<T> {
   readonly schema: JsonSchema;
@@ -42,7 +38,7 @@ export const toJson = <T>(descriptor: JsonDescriptor<T>, value: T): string =>
 export const fromJson = <T>(
   descriptor: JsonDescriptor<T>,
   json: string,
-): T | JsonConversionError => descriptor.converter.fromJson(json);
+): DecodeResult<T> => descriptor.converter.fromJson(json);
 
 export const imap = <T, Underlying>(
   underlying: JsonDescriptor<Underlying>,
@@ -51,36 +47,40 @@ export const imap = <T, Underlying>(
 ): JsonDescriptor<T> =>
   JsonDescriptor<T>(
     underlying.schema,
-    JsonConverter<T>({
+    {
       fromJson: (json) => {
-        const value = underlying.converter.fromJson(json);
+        const result = underlying.converter.fromJson(json);
 
-        if (isJsonConversionError(value)) {
-          return value;
+        if (!result.ok) {
+          return result;
         }
 
-        try {
-          return from(value);
-        } catch (error) {
-          return new JsonConversionError("Unable to map JSON value.", {
-            cause: error,
-          });
-        }
+        return valid(from(result.value));
       },
       toJson: (value) => underlying.converter.toJson(to(value)),
-    }),
+    },
     underlying.humanDoc,
   );
 
-const parseJson = (json: string): unknown | JsonConversionError => {
+const valid = <T>(value: T): DecodeResult<T> => ({
+  ok: true,
+  value,
+});
+
+const invalid = (error: JsonConversionError): DecodeResult<never> => ({
+  ok: false,
+  error,
+});
+
+const parseJson = (json: string): DecodeResult<unknown> => {
   try {
-    return JSON.parse(json) as unknown;
+    return valid(JSON.parse(json) as unknown);
   } catch (error) {
-    return new JsonConversionError("Invalid JSON.", { cause: error });
+    return invalid(new JsonConversionError("Invalid JSON.", { cause: error }));
   }
 };
 
-const describeParsedValue = (value: unknown): string => {
+const describeJsonValue = (value: unknown): string => {
   if (value === null) {
     return "null";
   }
@@ -103,50 +103,58 @@ const describeParsedValue = (value: unknown): string => {
   }
 };
 
-export const jsonString = (): JsonDescriptor<string> =>
-  JsonDescriptor<string>(
-    JsonString(),
-    JsonConverter<string>({
-      fromJson: (json) => {
-        const value = parseJson(json);
+const validateJsonType = <T>(
+  value: unknown,
+  expected: string,
+  matches: (value: unknown) => value is T,
+): DecodeResult<T> => {
+  if (matches(value)) {
+    return valid(value);
+  }
 
-        if (isJsonConversionError(value)) {
-          return value;
-        }
+  return invalid(
+    new JsonConversionError(
+      `Expected JSON ${expected}, received ${describeJsonValue(value)}.`,
+    ),
+  );
+};
 
-        if (typeof value !== "string") {
-          return new JsonConversionError(
-            `Expected JSON string, received ${describeParsedValue(value)}.`,
-          );
-        }
+const decodeJson = <T>(
+  json: string,
+  expected: string,
+  matches: (value: unknown) => value is T,
+): DecodeResult<T> => {
+  const parsed = parseJson(json);
 
-        return value;
-      },
+  if (!parsed.ok) {
+    return parsed;
+  }
+
+  const validated = validateJsonType(parsed.value, expected, matches);
+
+  return validated;
+};
+
+const primitiveDescriptor = <T>(
+  schema: JsonSchema,
+  humanDocText: string,
+  matches: (value: unknown) => value is T,
+): JsonDescriptor<T> =>
+  JsonDescriptor<T>(
+    schema,
+    {
+      fromJson: (json) => decodeJson(json, humanDocText, matches),
       toJson: (value) => JSON.stringify(value),
-    }),
-    () => "string",
+    },
+    () => humanDocText,
+  );
+
+export const jsonString = (): JsonDescriptor<string> =>
+  primitiveDescriptor(JsonString(), "string", (value): value is string =>
+    typeof value === "string",
   );
 
 export const jsonBoolean = (): JsonDescriptor<boolean> =>
-  JsonDescriptor<boolean>(
-    JsonBoolean(),
-    JsonConverter<boolean>({
-      fromJson: (json) => {
-        const value = parseJson(json);
-
-        if (isJsonConversionError(value)) {
-          return value;
-        }
-
-        if (typeof value !== "boolean") {
-          return new JsonConversionError(
-            `Expected JSON boolean, received ${describeParsedValue(value)}.`,
-          );
-        }
-
-        return value;
-      },
-      toJson: (value) => JSON.stringify(value),
-    }),
-    () => "boolean",
+  primitiveDescriptor(JsonBoolean(), "boolean", (value): value is boolean =>
+    typeof value === "boolean",
   );
