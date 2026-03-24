@@ -1,7 +1,7 @@
 {
   "name": "turkish",
   "version": "1.0.0",
-  "description": "TypeScript port of xplosunn/transporter",
+  "description": "Json schema compatibility checker",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
